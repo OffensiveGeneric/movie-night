@@ -1,60 +1,85 @@
 # Movie Night
 
-A small app for watching TV and movies together from two homes, in sync, without streaming.
+Watch TV and movies together from two homes, in sync, without streaming.
 
 My dad and I used Plex's Watch Together. It buffered, sometimes wouldn't resume after a pause, and needed Plex accounts on both ends. So we switched to the opposite design: each of us keeps a copy of the library, copied ahead of time, and the only thing that crosses the internet during playback is "play / pause / seek to 12:48". Movie Night is the part that makes that feel like one app instead of three.
+
+## What it does
+
+- **Library with artwork.** Scans your folders, works out show / season / episode and title / year from messy release names, and shows posters and episode stills from TMDB.
+- **Watch together.** The host clicks Play; a few seconds later the guest's Movie Night shows *"Tyler is starting Star Trek DS9 S01E12 · Battle Lines [Join]"*. One click and both players open the same episode in sync.
+- **Download status.** On the receiving side every episode shows *ready*, *downloading* or *queued*, straight from Syncthing, plus how much is left.
+- **Continue watching.** "Next: S01E13" for every show you're partway through.
+- **Fixes the known Syncplay traps.** Spots the settings that make playback jump back to 00:00 or stall on "not ready", and fixes them in one click. A **Restart player** button rejoins the room if anything gets stuck.
+- **Zero setup on first run.** It reads Syncplay's media folders and name, and asks Syncthing which side of the share it's on.
 
 ## How it works
 
 ```
- Tyler's PC                                          Dad's PC
-┌──────────────────────┐                     ┌──────────────────────┐
-│ Movie Night (web UI) │                     │ Movie Night (web UI) │
-│        │ launch      │                     │      launch │        │
-│        ▼             │   play/pause/seek   │             ▼        │
-│ Syncplay ◄─► VLC ────┼──── Syncplay server ┼──── VLC ◄─► Syncplay │
-│                      │                     │                      │
-│ D:\TV, D:\Movies ────┼──── Syncthing ─────►┼──► Movie Night folder│
-└──────────────────────┘ (copies files ahead)└──────────────────────┘
+ Host (Tyler)                                          Guest (Dad)
+┌────────────────────────┐                     ┌────────────────────────┐
+│ Movie Night (web UI)   │                     │ Movie Night (web UI)   │
+│   │ Play       ▲ art   │                     │   ▲ invite, art  │ Join│
+│   ▼            │       │   play/pause/seek   │   │              ▼     │
+│ Syncplay ◄─► VLC ──────┼─── Syncplay server ─┼──── VLC ◄─► Syncplay   │
+│                        │                     │                        │
+│ D:\TV  (send-only) ────┼───── Syncthing ────►┼──► Movie Night folder  │
+│   .movienight/         │  files, invite.json,│     (receive-only)     │
+│     invite.json, art/  │  posters            │                        │
+└────────────────────────┘                     └────────────────────────┘
 ```
 
-- **[Syncthing](https://syncthing.net/)** copies the library peer-to-peer ahead of time: send-only from the library side, receive-only on the other.
+- **[Syncthing](https://syncthing.net/)** copies the library peer-to-peer ahead of time. It also carries a tiny `.movienight/` folder holding the current invite and the artwork cache, so the guest needs neither a server, an open port nor a TMDB key.
 - **[Syncplay](https://syncplay.pl/)** keeps the two players in step and corrects drift.
-- **VLC** (or mpv) plays the local file at full quality, with nothing to buffer.
-- **Movie Night** scans the library, shows it as a browsable catalogue, and opens the chosen episode in Syncplay with one click.
+- **VLC** (or mpv) plays the local file at full quality, so there's nothing to buffer.
+- Every item's ID comes from *what it is* (show + season + episode, or title + year), not where its file lives, so an invite or a poster means the same thing on both machines.
 
-## Status
+## Setup
 
-Early. What works now:
+Both machines need [Syncthing](https://syncthing.net/), [Syncplay](https://syncplay.pl/) and [VLC](https://www.videolan.org/), with Syncplay pointed at the same room and its media folders set to the library. See [docs/setup.md](docs/setup.md) for the whole walkthrough.
 
-- Scans TV and movie folders and works out show / season / episode and title / year from messy release names.
-- Web UI for browsing shows, seasons and movies, with search.
-- **Play** opens the item in Syncplay, closing any earlier session first.
+Then just run `movienight.exe`. The UI opens at http://127.0.0.1:8737. On first run it writes a config to `%APPDATA%\movienight\config.json` (`~/Library/Application Support/movienight/` on macOS, `~/.config/movienight/` on Linux) that you can edit:
 
-Roadmap:
+| Key | What it's for |
+|---|---|
+| `name` | How you appear in invites (defaults to your Syncplay name) |
+| `libraries` | `[{ "name", "path", "kind": "tv" \| "movies" \| "auto" }]` |
+| `exclude` | Folder or file names to skip, e.g. an app installed inside your Movies folder |
+| `tmdbKey` | TMDB API key or read access token, for artwork. Only the host needs one. Or set `MOVIENIGHT_TMDB_KEY`. |
+| `artOverrides` | Pin titles that search can't match: `{ "Star Trek DS9": "tv:580" }` |
+| `syncplay` | Path to Syncplay, if it isn't in the usual place |
+| `syncthing` | `{ "url", "apiKey" }`, if not the local defaults (the key is read from Syncthing itself) |
 
-- [ ] Posters and backdrops from TMDB; episode thumbnails extracted from the files
-- [ ] Download status per episode on the receiving side (ready / downloading % / queued), from Syncthing's REST API
-- [ ] **Watch together** invite: one side picks an episode, the other gets a "Join" banner
-- [ ] Continue watching / next episode
-- [ ] "Fix it" button: restart Syncplay and rejoin at the room's position
-- [ ] Packaged builds for Windows and macOS
-
-## Running it
-
-Requires Go 1.22+ and Syncplay with VLC or mpv.
+## Development
 
 ```
+go test ./...
 go build -o bin/ ./cmd/movienight
 ```
 
-Copy `config.example.json` to your config directory (`%APPDATA%\movienight\config.json` on Windows, `~/Library/Application Support/movienight/config.json` on macOS, `~/.config/movienight/config.json` on Linux), set your library paths, then run `bin/movienight`. The UI opens at http://127.0.0.1:8737.
+Plain Go standard library, plus a framework-free HTML/JS UI embedded in the binary.
+
+```
+cmd/movienight      startup: config / autodetect, role detection, wiring
+internal/library    folder scan and release-name parsing
+internal/server     HTTP API, background refresh, invites
+internal/art        artwork cache and TMDB fetcher
+internal/tmdb       minimal TMDB client
+internal/syncthing  REST client: folders, what's still downloading
+internal/syncplay   read and repair Syncplay's settings
+internal/invite     the invite file
+internal/state      watch history
+internal/player     launches Syncplay
+web/                the UI
+```
 
 ## Notes
 
-The UI listens on loopback only. The API accepts library item IDs, never file paths, and state-changing requests need a custom header that cross-site pages can't send, so a random web page can't make your machine start playing things.
+**Security.** The UI listens on loopback only. The API accepts library item IDs, never file paths, and state-changing requests need a custom header that cross-site pages can't send, so a random web page can't make your machine start playing things.
 
-Lesson learned while building it: Syncplay re-scans its media folders every 30 seconds by default, and with shared playlists on it can re-open the current file when the folder changes. On the receiving machine, Syncthing changes that folder constantly, so playback kept snapping back to 00:00. Setting `sharedplaylistenabled = False` and a long `foldersearchdoublecheckinterval` fixed it.
+**The 00:00 bug.** Syncplay re-scans its media folders every 30 seconds by default, and with shared playlists on it can re-open the current file when the folder has changed. On the receiving machine Syncthing changes that folder constantly, so playback kept snapping back to 00:00 every 30 seconds. Turning off shared playlists and stretching the re-scan interval fixes it. That's the first thing the settings check looks for.
+
+**Artwork.** This product uses the TMDB API but is not endorsed or certified by TMDB.
 
 ## License
 
