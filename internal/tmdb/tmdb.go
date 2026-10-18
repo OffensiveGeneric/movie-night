@@ -33,8 +33,22 @@ func New(key string) *Client {
 }
 
 type Result struct {
-	ID         int    `json:"id"`
-	PosterPath string `json:"poster_path"`
+	ID           int    `json:"id"`
+	PosterPath   string `json:"poster_path"`
+	ReleaseDate  string `json:"release_date"`   // movies
+	FirstAirDate string `json:"first_air_date"` // shows
+}
+
+func (r Result) year() int {
+	d := r.ReleaseDate
+	if d == "" {
+		d = r.FirstAirDate
+	}
+	if len(d) < 4 {
+		return 0
+	}
+	y, _ := strconv.Atoi(d[:4])
+	return y
 }
 
 type Episode struct {
@@ -73,8 +87,10 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 }
 
 // Search returns the best match for a title, or nil. kind is "tv" or "movie".
-// A year narrows the search; if nothing matches with it, the search is
-// retried without.
+// A year narrows the search. If nothing matches with it, the search is
+// retried without, and then a result dated within a year of it wins over
+// the top hit: a 2001 folder name often means a 2002 TMDB entry, while the
+// top hit for the bare title can be something else entirely.
 func (c *Client) Search(ctx context.Context, kind, title string, year int) (*Result, error) {
 	yearParam := "year"
 	if kind == "tv" {
@@ -91,12 +107,20 @@ func (c *Client) Search(ctx context.Context, kind, title string, year int) (*Res
 		if err := c.get(ctx, "/search/"+kind, q, &res); err != nil {
 			return nil, err
 		}
-		if len(res.Results) > 0 {
-			return &res.Results[0], nil
+		if len(res.Results) == 0 {
+			if !withYear {
+				break
+			}
+			continue
 		}
-		if !withYear {
-			break
+		if !withYear && year > 0 {
+			for i, r := range res.Results {
+				if d := r.year() - year; d >= -1 && d <= 1 {
+					return &res.Results[i], nil
+				}
+			}
 		}
+		return &res.Results[0], nil
 	}
 	return nil, nil
 }

@@ -184,15 +184,44 @@ func (f *Fetcher) resolve(ctx context.Context, kind, title string, year int) (*t
 		}
 		return f.Client.Details(ctx, okind, id)
 	}
-	r, err := f.Client.Search(ctx, kind, title, year)
-	if err != nil || r != nil {
-		return r, err
-	}
-	// "Director - Title" names: try the part after the dash.
-	if _, rest, ok := strings.Cut(title, " - "); ok {
-		return f.Client.Search(ctx, kind, rest, year)
+	for _, q := range searchVariants(title) {
+		r, err := f.Client.Search(ctx, kind, q, year)
+		if err != nil || r != nil {
+			return r, err
+		}
 	}
 	return nil, nil
+}
+
+var (
+	parenthetical = regexp.MustCompile(`\s*\([^)]*\)`)
+	editionSuffix = regexp.MustCompile(`(?i)\s+(\d+(st|nd|rd|th)\s+anniversary|anniversary|special|extended|director'?s|criterion|remastered|restored|theatrical)\b.*$`)
+)
+
+// searchVariants lists progressively looser queries for a title from a
+// release name: as is, without notes in brackets ("Of Mice and Men (Lon
+// Chaney)"), without edition suffixes ("Spartacus 50th Anniversary
+// Edition"), and the part after a "Director - " prefix.
+func searchVariants(title string) []string {
+	out := []string{title}
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		for _, x := range out {
+			if strings.EqualFold(x, s) {
+				return
+			}
+		}
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	base := parenthetical.ReplaceAllString(title, "")
+	add(base)
+	add(editionSuffix.ReplaceAllString(base, ""))
+	if _, rest, ok := strings.Cut(base, " - "); ok {
+		add(rest)
+	}
+	return out
 }
 
 func (f *Fetcher) show(ctx context.Context, s *library.Show) error {

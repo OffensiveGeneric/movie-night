@@ -155,7 +155,9 @@ func (s *Server) handleArt(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	for _, store := range s.opt.ArtStores {
 		if store.Has(id) {
-			w.Header().Set("Cache-Control", "max-age=3600")
+			// Revalidate (cheap: ServeFile answers 304 from the file's mtime)
+			// so a corrected poster shows up straight away.
+			w.Header().Set("Cache-Control", "no-cache")
 			http.ServeFile(w, r, store.Path(id))
 			return
 		}

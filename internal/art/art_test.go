@@ -42,6 +42,21 @@ func fakeTMDB(t *testing.T) *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
+func TestSearchVariants(t *testing.T) {
+	tests := map[string]string{
+		"Of Mice and Men (Lon Chaney)":       "Of Mice and Men",
+		"Spartacus 50th Anniversary Edition": "Spartacus",
+		"Charlie Chaplin - The Gold Rush":    "The Gold Rush",
+		"Lawrence Of Arabia":                 "Lawrence Of Arabia",
+	}
+	for in, want := range tests {
+		v := searchVariants(in)
+		if v[len(v)-1] != want {
+			t.Errorf("searchVariants(%q) = %q, want it to end with %q", in, v, want)
+		}
+	}
+}
+
 func TestFetcher(t *testing.T) {
 	srv := fakeTMDB(t)
 	defer srv.Close()
