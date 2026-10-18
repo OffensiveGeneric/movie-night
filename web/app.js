@@ -220,7 +220,36 @@ async function loadInvite() {
   box.hidden = false;
 }
 
+// Host only: a computer that ran "movienight setup join" and is waiting.
+const dismissedPairing = new Set();
+async function loadPairing() {
+  if (state.status.role !== "host") return;
+  const { pending } = await api("/api/pairing");
+  const next = (pending || []).find((p) => !dismissedPairing.has(p.id));
+  const box = $("#pairing");
+  box.hidden = !next;
+  if (!next) return;
+  box.dataset.id = next.id;
+  box.dataset.name = next.name || "";
+  $("#pairing-name").textContent = next.name || "A new";
+}
+
 // --- wiring ---------------------------------------------------------------
+
+$("#pairing-accept").addEventListener("click", async () => {
+  const box = $("#pairing");
+  try {
+    const { name, folders } = await api("/api/pairing/accept", { id: box.dataset.id, name: box.dataset.name });
+    toast(`Connected ${name}. Sharing ${folders} folder${folders === 1 ? "" : "s"}; copying starts now.`);
+    box.hidden = true;
+  } catch (err) {
+    toast(`Couldn't connect: ${err.message}`);
+  }
+});
+$("#pairing-dismiss").addEventListener("click", () => {
+  dismissedPairing.add($("#pairing").dataset.id);
+  $("#pairing").hidden = true;
+});
 
 document.querySelectorAll("nav button").forEach((b) =>
   b.addEventListener("click", () => {
@@ -273,8 +302,9 @@ $("#syncplay-fix").addEventListener("click", async () => {
 
 const safe = (fn) => () => fn().catch(() => {});
 safe(loadLibrary)();
-safe(loadStatus)();
+safe(loadStatus)().then(safe(loadPairing));
 safe(loadInvite)();
 setInterval(safe(loadInvite), 5000);
+setInterval(safe(loadPairing), 10000);
 setInterval(safe(loadStatus), 15000);
 setInterval(safe(loadLibrary), 60000);

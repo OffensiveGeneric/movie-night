@@ -3,11 +3,13 @@
 package syncthing
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -58,7 +60,24 @@ type FolderStatus struct {
 	NeedBytes   int64  `json:"needBytes"`
 }
 
+// StatusError is a non-200 answer from Syncthing.
+type StatusError struct {
+	Path string
+	Code int
+}
+
+func (e *StatusError) Error() string { return fmt.Sprintf("syncthing %s: HTTP %d", e.Path, e.Code) }
+
+func isNotFound(err error) bool {
+	var se *StatusError
+	return errors.As(err, &se) && se.Code == http.StatusNotFound
+}
+
 func (c *Client) get(ctx context.Context, path string, q url.Values, out any) error {
+	return c.do(ctx, http.MethodGet, path, q, nil, out)
+}
+
+func (c *Client) do(ctx context.Context, method, path string, q url.Values, body, out any) error {
 	if c.APIKey == "" {
 		return errors.New("no Syncthing API key")
 	}
@@ -66,18 +85,32 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 	if q != nil {
 		u += "?" + q.Encode()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	var rd io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		rd = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u, rd)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("X-API-Key", c.APIKey)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	res, err := c.HTTP.Do(req)
 	if err != nil {
 		return err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("syncthing %s: %s", path, res.Status)
+		return &StatusError{path, res.StatusCode}
+	}
+	if out == nil {
+		return nil
 	}
 	return json.NewDecoder(res.Body).Decode(out)
 }
@@ -181,7 +214,7 @@ func expandHome(p string) string {
 // discoverAPIKey asks the syncthing binary, then falls back to reading its
 // config.xml from the usual places.
 func discoverAPIKey() string {
-	for _, exe := range syncthingBinaries() {
+	for _, exe := range Binaries() {
 		out, err := exec.Command(exe, "cli", "config", "gui", "apikey", "get").Output()
 		if err == nil && len(strings.TrimSpace(string(out))) > 0 {
 			return strings.TrimSpace(string(out))
@@ -204,7 +237,8 @@ func discoverAPIKey() string {
 	return ""
 }
 
-func syncthingBinaries() []string {
+// Binaries lists installed syncthing executables, most likely first.
+func Binaries() []string {
 	var out []string
 	if runtime.GOOS == "windows" {
 		out = append(out, filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "Syncthing", "syncthing.exe"),

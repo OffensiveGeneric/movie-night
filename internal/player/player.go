@@ -19,7 +19,7 @@ type Launcher struct {
 func (l Launcher) Play(path string) error {
 	exe := l.Syncplay
 	if exe == "" {
-		exe = findSyncplay()
+		exe = FindSyncplay()
 	}
 	if exe == "" {
 		return errors.New("Syncplay not found; set \"syncplay\" in the config")
@@ -32,7 +32,8 @@ func (l Launcher) Play(path string) error {
 	return cmd.Process.Release()
 }
 
-func findSyncplay() string {
+// FindSyncplay returns Syncplay's path in the usual install locations, or "".
+func FindSyncplay() string {
 	var candidates []string
 	switch runtime.GOOS {
 	case "windows":

@@ -11,6 +11,30 @@ const sample = "[server_data]\r\nhost = syncplay.pl\r\n\r\n[client_settings]\r\n
 	"mediasearchdirectories = ['C:\\\\Users\\\\Dad\\\\Videos\\\\Movie Night', 'D:\\\\Movies']\r\n" +
 	"sharedplaylistenabled = True\r\nreadyatstart = True\r\n\r\n[gui]\r\nshowosd = True\r\n"
 
+func TestSetCreatesAndRoundTrips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "syncplay.ini")
+	dirs := []string{`C:\Users\Dad\Videos\Movie Night`, `D:\Dad's Movies`}
+	if err := Set(path, "server_data", []Setting{{"host", "syncplay.pl"}, {"port", "8997"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Set(path, "client_settings", []Setting{{"name", "Dad"}, {"mediasearchdirectories", FormatList(dirs)}}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Name != "Dad" || len(s.MediaDirs) != 2 || s.MediaDirs[0] != dirs[0] {
+		t.Errorf("round trip: name %q dirs %q", s.Name, s.MediaDirs)
+	}
+	// Setting again replaces rather than duplicates.
+	Set(path, "client_settings", []Setting{{"name", "Pops"}})
+	b, _ := os.ReadFile(path)
+	if strings.Count(string(b), "name =") != 1 || !strings.Contains(string(b), "name = Pops") {
+		t.Errorf("name not replaced in place:\n%s", b)
+	}
+}
+
 func TestReadAndFix(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "syncplay.ini")
 	os.WriteFile(path, []byte(sample), 0o644)

@@ -18,6 +18,7 @@ import (
 	"github.com/offensivegeneric/movie-night/internal/art"
 	"github.com/offensivegeneric/movie-night/internal/config"
 	"github.com/offensivegeneric/movie-night/internal/server"
+	"github.com/offensivegeneric/movie-night/internal/setup"
 	"github.com/offensivegeneric/movie-night/internal/state"
 	"github.com/offensivegeneric/movie-night/internal/syncplay"
 	"github.com/offensivegeneric/movie-night/internal/syncthing"
@@ -25,6 +26,10 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "setup" {
+		os.Exit(setup.Main(os.Args[2:], os.Stdin, os.Stdout))
+	}
+
 	defaultConfig, _ := config.DefaultPath()
 	configPath := flag.String("config", defaultConfig, "path to config.json")
 	addr := flag.String("addr", "", "listen address (overrides the config)")
@@ -32,6 +37,14 @@ func main() {
 	flag.Parse()
 
 	cfg, err := loadOrDetect(*configPath)
+	if errors.Is(err, errNothingToDetect) {
+		// A fresh computer: walk through setup instead of failing.
+		log.Printf("Nothing set up yet; starting setup.")
+		if setup.Main(nil, os.Stdin, os.Stdout) != 0 {
+			os.Exit(1)
+		}
+		cfg, err = loadOrDetect(*configPath)
+	}
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -113,6 +126,8 @@ func main() {
 	log.Fatal(http.ListenAndServe(cfg.Addr, srv.Handler()))
 }
 
+var errNothingToDetect = errors.New("no config yet and no media folders in Syncplay's settings: run \"movienight setup\"")
+
 // loadOrDetect reads the config, or on first run builds one from Syncplay's
 // settings (its name and media folders) so there's nothing to set up.
 func loadOrDetect(path string) (*config.Config, error) {
@@ -125,7 +140,7 @@ func loadOrDetect(path string) (*config.Config, error) {
 		return nil, err
 	}
 	if len(sp.MediaDirs) == 0 {
-		return nil, errors.New("no config yet and no media folders in Syncplay's settings: copy config.example.json to " + path)
+		return nil, errNothingToDetect
 	}
 	var libs []config.Library
 	for _, dir := range sp.MediaDirs {

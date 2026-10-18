@@ -14,6 +14,7 @@ import (
 	"github.com/offensivegeneric/movie-night/internal/library"
 	"github.com/offensivegeneric/movie-night/internal/state"
 	"github.com/offensivegeneric/movie-night/internal/syncthing"
+	"github.com/offensivegeneric/movie-night/internal/syncthing/stfake"
 )
 
 // fakeLauncher stands in for Syncplay.
@@ -125,6 +126,41 @@ func TestDetectShare(t *testing.T) {
 	host := []syncthing.Folder{{ID: "movie-night", Path: share, Type: "sendonly"}}
 	if _, role := DetectShare([]config.Library{{Path: share}}, host); role != Host {
 		t.Errorf("send-only folder should make this side the host, got %s", role)
+	}
+}
+
+func TestAcceptPairing(t *testing.T) {
+	fake := stfake.New("HOST-ID")
+	defer fake.Close()
+	tv := t.TempDir()
+	fake.AddFolder("movie-night", "Movie Night", tv, "sendonly")
+	fake.Pending["GUEST-ID"] = map[string]any{"name": "Dad", "address": "1.2.3.4:22000"}
+	st := fake.Client()
+	folders, _ := st.Folders(context.Background())
+
+	cfg := &config.Config{Name: "Tyler", Libraries: []config.Library{{Name: "TV", Path: tv, Kind: "tv"}}}
+	s := New(Options{Config: cfg, Role: Host, Syncthing: st, Folders: folders, State: state.Load(filepath.Join(t.TempDir(), "s.json"))})
+	s.launcher = &fakeLauncher{}
+	s.Refresh(context.Background())
+	h := s.Handler()
+
+	if body := call(t, h, "GET", "/api/pairing", "").Body.String(); !strings.Contains(body, "GUEST-ID") {
+		t.Fatalf("pairing list = %s", body)
+	}
+	if rec := call(t, h, "POST", "/api/pairing/accept", `{"id":"SOMEONE-ELSE"}`); rec.Code != http.StatusNotFound {
+		t.Errorf("accepting a device that never asked: %d, want 404", rec.Code)
+	}
+	if rec := call(t, h, "POST", "/api/pairing/accept", `{"id":"GUEST-ID"}`); rec.Code != 200 {
+		t.Fatalf("accept: %d %s", rec.Code, rec.Body)
+	}
+	if fake.Devices["GUEST-ID"] == nil || fake.Devices["GUEST-ID"]["name"] != "Dad" {
+		t.Errorf("guest device not added: %+v", fake.Devices)
+	}
+	if d := fake.FolderDevices("movie-night"); len(d) != 1 || d[0] != "GUEST-ID" {
+		t.Errorf("TV not shared with guest: %v", d)
+	}
+	if body := call(t, h, "GET", "/api/pairing", "").Body.String(); strings.Contains(body, "GUEST-ID") {
+		t.Errorf("guest still pending after accept: %s", body)
 	}
 }
 

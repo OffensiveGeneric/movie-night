@@ -106,9 +106,49 @@ func New(path, name string, libs []Library) (*Config, error) {
 	if err := c.finish(); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	return c, c.Save(path)
+}
+
+// Update loads the config at path (or starts an empty one), applies name
+// and libraries, and saves it, keeping everything else (TMDB key,
+// overrides, excludes) as it was.
+func Update(path, name string, libs []Library) (*Config, error) {
+	c := &Config{}
+	if b, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(b, c); err != nil {
+			return nil, fmt.Errorf("parsing %s: %w", path, err)
+		}
+	}
+	c.Name, c.Libraries = name, libs
+	if c.Exclude == nil {
+		c.Exclude = []string{}
+	}
+	if c.ArtOverrides == nil {
+		c.ArtOverrides = map[string]string{}
+	}
+	if err := c.finish(); err != nil {
 		return nil, err
 	}
-	b, _ := json.MarshalIndent(c, "", "  ")
-	return c, os.WriteFile(path, b, 0o600)
+	return c, c.Save(path)
+}
+
+// Save writes the config to path. It's private to the user (0600) because
+// it can hold a TMDB key.
+func (c *Config) Save(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	out := *c
+	if os.Getenv("MOVIENIGHT_TMDB_KEY") != "" {
+		// Don't copy a key that came from the environment into the file.
+		if b, err := os.ReadFile(path); err == nil {
+			var onDisk Config
+			json.Unmarshal(b, &onDisk)
+			out.TMDBKey = onDisk.TMDBKey
+		} else {
+			out.TMDBKey = ""
+		}
+	}
+	b, _ := json.MarshalIndent(out, "", "  ")
+	return os.WriteFile(path, b, 0o600)
 }
