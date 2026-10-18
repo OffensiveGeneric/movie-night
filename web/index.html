@@ -14,17 +14,48 @@
       <button data-tab="movies">Movies</button>
     </nav>
     <input id="search" type="search" placeholder="Search" aria-label="Search the library">
-    <button id="rescan" title="Look for new files">Refresh</button>
+    <div class="actions">
+      <button id="restart" class="ghost" title="Close and reopen the player, rejoining at the current spot">Restart player</button>
+      <button id="rescan" class="ghost" title="Look for new files">Refresh</button>
+    </div>
   </header>
 
+  <div id="banners">
+    <div id="invite" class="banner invite" hidden>
+      <div><strong id="invite-from"></strong> is starting <strong id="invite-title"></strong></div>
+      <div class="banner-actions">
+        <button id="invite-join" class="primary">Join</button>
+        <button id="invite-dismiss" class="ghost">Not now</button>
+      </div>
+    </div>
+    <div id="syncplay-warning" class="banner warn" hidden>
+      <div>Syncplay's settings can make playback jump back to the start or wait on "not ready".</div>
+      <div class="banner-actions"><button id="syncplay-fix" class="primary">Fix settings</button></div>
+    </div>
+    <div id="downloads" class="banner info" hidden></div>
+  </div>
+
   <main>
-    <section id="grid" class="grid" aria-live="polite"></section>
+    <section id="home">
+      <div id="continue-wrap" hidden>
+        <h2 class="row-title">Continue watching</h2>
+        <div id="continue" class="row"></div>
+      </div>
+      <section id="grid" class="grid" aria-live="polite"></section>
+    </section>
     <section id="show" hidden>
-      <button id="back">← All shows</button>
-      <h2 id="show-title"></h2>
+      <button id="back" class="ghost">← All shows</button>
+      <div class="show-head">
+        <div id="show-poster" class="poster"></div>
+        <h2 id="show-title"></h2>
+      </div>
       <div id="seasons"></div>
     </section>
   </main>
+
+  <footer>
+    This product uses the TMDB API but is not endorsed or certified by TMDB.
+  </footer>
 
   <div id="toast" role="status" hidden></div>
   <script src="app.js"></script>
