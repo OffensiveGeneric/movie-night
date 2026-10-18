@@ -48,7 +48,7 @@ func main() {
 	folders, err := st.Folders(probe)
 	cancel()
 	if err != nil {
-		log.Printf("Syncthing not available (%v); download status and invites are off", err)
+		log.Printf("Syncthing not available (%v); download status is off", err)
 	} else {
 		opt.Syncthing, opt.Folders = st, folders
 	}
@@ -65,6 +65,22 @@ func main() {
 			}
 			break
 		}
+	}
+	if cfg.SharedDir != "" {
+		shared = cfg.SharedDir
+		if opt.Role == server.Solo {
+			opt.Role = server.Host
+		}
+	}
+	switch cfg.Role {
+	case "host":
+		opt.Role = server.Host
+	case "guest":
+		opt.Role = server.Guest
+	}
+
+	if shared == "" {
+		log.Printf("no shared folder found; invites are off and artwork stays on this machine")
 	}
 
 	cacheDir, _ := os.UserCacheDir()

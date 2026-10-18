@@ -43,6 +43,11 @@ type Config struct {
 	// ArtOverrides pins titles that search can't match to a TMDB entry,
 	// e.g. {"Star Trek DS9": "tv:580"}.
 	ArtOverrides map[string]string `json:"artOverrides"`
+	// Role ("host" or "guest") and SharedDir (the .movienight folder both
+	// sides see) are normally worked out from Syncthing; set them to
+	// override that, e.g. when the folder is shared some other way.
+	Role      string `json:"role,omitempty"`
+	SharedDir string `json:"sharedDir,omitempty"`
 }
 
 // DefaultPath is <user config dir>/movienight/config.json,
