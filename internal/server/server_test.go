@@ -13,6 +13,7 @@ import (
 	"github.com/offensivegeneric/movie-night/internal/config"
 	"github.com/offensivegeneric/movie-night/internal/library"
 	"github.com/offensivegeneric/movie-night/internal/state"
+	"github.com/offensivegeneric/movie-night/internal/syncthing"
 )
 
 // fakeLauncher stands in for Syncplay.
@@ -94,6 +95,36 @@ func TestInviteHostToGuest(t *testing.T) {
 	json.Unmarshal(call(t, guest.Handler(), "GET", "/api/library", "").Body.Bytes(), &lib)
 	if len(lib.Continue) != 0 {
 		t.Errorf("continue = %v, want empty with no next episode", lib.Continue)
+	}
+}
+
+func TestDetectShare(t *testing.T) {
+	videos := filepath.Join(string(filepath.Separator), "Users", "Dad", "Videos")
+	share := filepath.Join(videos, "Movie Night")
+	folders := []syncthing.Folder{
+		{ID: "movie-night", Path: share, Type: "receiveonly"},
+		{ID: "movie-night-movies", Path: filepath.Join(videos, "Movie Night - Movies"), Type: "receiveonly"},
+	}
+	tests := []struct {
+		name string
+		lib  string
+		dir  string
+		role Role
+	}{
+		{"library is the share", share, filepath.Join(share, ".movienight"), Guest},
+		{"library contains the share", videos, filepath.Join(share, ".movienight"), Guest},
+		{"library inside the share", filepath.Join(share, "TV"), filepath.Join(share, ".movienight"), Guest},
+		{"not shared", filepath.Join(string(filepath.Separator), "Other"), "", Solo},
+	}
+	for _, tt := range tests {
+		dir, role := DetectShare([]config.Library{{Path: tt.lib}}, folders)
+		if dir != tt.dir || role != tt.role {
+			t.Errorf("%s: got %q %s, want %q %s", tt.name, dir, role, tt.dir, tt.role)
+		}
+	}
+	host := []syncthing.Folder{{ID: "movie-night", Path: share, Type: "sendonly"}}
+	if _, role := DetectShare([]config.Library{{Path: share}}, host); role != Host {
+		t.Errorf("send-only folder should make this side the host, got %s", role)
 	}
 }
 

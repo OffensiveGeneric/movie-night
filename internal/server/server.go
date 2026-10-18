@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -30,6 +31,23 @@ const (
 	Guest Role = "guest"
 	Solo  Role = "solo"
 )
+
+// DetectShare finds the first library backed by a Syncthing folder. That
+// folder's root holds the shared .movienight directory (invites, artwork),
+// and its type decides the role: receive-only means this side is the guest.
+func DetectShare(libs []config.Library, folders []syncthing.Folder) (sharedDir string, role Role) {
+	for _, l := range libs {
+		m, ok := syncthing.Locate(folders, l.Path)
+		if !ok {
+			continue
+		}
+		if m.Folder.Type == "receiveonly" {
+			return filepath.Join(m.Folder.Path, ".movienight"), Guest
+		}
+		return filepath.Join(m.Folder.Path, ".movienight"), Host
+	}
+	return "", Solo
+}
 
 type Options struct {
 	Config     *config.Config
@@ -77,21 +95,23 @@ func (s *Server) Refresh(ctx context.Context) {
 	var downloads []Download
 	if st := s.opt.Syncthing; st != nil {
 		for _, l := range s.opt.Config.Libraries {
-			f, ok := syncthing.FolderFor(s.opt.Folders, l.Path)
+			m, ok := syncthing.Locate(s.opt.Folders, l.Path)
 			if !ok {
 				continue
 			}
-			if need, err := st.Need(ctx, f.ID); err == nil {
+			if need, err := st.Need(ctx, m.Folder.ID); err == nil {
 				for _, list := range []struct {
 					files  []syncthing.File
 					status library.Status
 				}{{need.Progress, library.Downloading}, {need.Queued, library.Queued}, {need.Rest, library.Queued}} {
 					for _, file := range list.files {
-						pending[l.Path] = append(pending[l.Path], library.Pending{Rel: file.Name, Size: file.Size, Status: list.status})
+						if rel, ok := m.LibraryRel(file.Name); ok {
+							pending[l.Path] = append(pending[l.Path], library.Pending{Rel: rel, Size: file.Size, Status: list.status})
+						}
 					}
 				}
 			}
-			if status, err := st.Status(ctx, f.ID); err == nil && status.NeedBytes > 0 {
+			if status, err := st.Status(ctx, m.Folder.ID); err == nil && status.NeedBytes > 0 {
 				downloads = append(downloads, Download{l.Name, status.NeedBytes, status.GlobalBytes})
 			}
 		}

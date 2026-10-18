@@ -103,22 +103,70 @@ func (c *Client) Status(ctx context.Context, folder string) (*FolderStatus, erro
 	return s, c.get(ctx, "/rest/db/status", url.Values{"folder": {folder}}, s)
 }
 
-// FolderFor returns the Syncthing folder whose root is dir, if any.
-func FolderFor(folders []Folder, dir string) (Folder, bool) {
-	for _, f := range folders {
-		if samePath(f.Path, dir) {
-			return f, true
-		}
-	}
-	return Folder{}, false
+// Match ties a library folder to the Syncthing folder that covers it. They
+// can be the same folder, the library can sit inside the Syncthing folder
+// (Sub is its path there), or the library can contain it (Outer is the
+// Syncthing folder's path inside the library).
+type Match struct {
+	Folder     Folder
+	Sub, Outer string // forward slashes; at most one is set
 }
 
-func samePath(a, b string) bool {
-	a, b = filepath.Clean(expandHome(a)), filepath.Clean(expandHome(b))
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+// Locate finds the Syncthing folder for a library directory: an exact or
+// enclosing folder first, then one inside the library.
+func Locate(folders []Folder, dir string) (Match, bool) {
+	for _, f := range folders {
+		if rel, ok := within(f.Path, dir); ok {
+			return Match{Folder: f, Sub: rel}, true
+		}
+	}
+	for _, f := range folders {
+		if rel, ok := within(dir, f.Path); ok {
+			return Match{Folder: f, Outer: rel}, true
+		}
+	}
+	return Match{}, false
+}
+
+// LibraryRel converts a path relative to the Syncthing folder into one
+// relative to the library, or reports false if it's outside the library.
+func (m Match) LibraryRel(name string) (string, bool) {
+	name = filepath.ToSlash(name)
+	switch {
+	case m.Sub != "":
+		prefix := m.Sub + "/"
+		if len(name) <= len(prefix) || !samePart(name[:len(prefix)], prefix) {
+			return "", false
+		}
+		return name[len(prefix):], true
+	case m.Outer != "":
+		return m.Outer + "/" + name, true
+	}
+	return name, true
+}
+
+var caseInsensitive = runtime.GOOS == "windows" || runtime.GOOS == "darwin"
+
+func samePart(a, b string) bool {
+	if caseInsensitive {
 		return strings.EqualFold(a, b)
 	}
 	return a == b
+}
+
+// within reports whether child is parent or below it, and child's path
+// relative to parent ("" when they're the same).
+func within(parent, child string) (string, bool) {
+	p := strings.TrimRight(filepath.Clean(expandHome(parent)), `\/`)
+	c := filepath.Clean(expandHome(child))
+	if samePart(strings.TrimRight(c, `\/`), p) {
+		return "", true
+	}
+	sep := string(filepath.Separator)
+	if len(c) <= len(p)+1 || !samePart(c[:len(p)+1], p+sep) {
+		return "", false
+	}
+	return filepath.ToSlash(c[len(p)+1:]), true
 }
 
 func expandHome(p string) string {

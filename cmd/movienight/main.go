@@ -53,19 +53,10 @@ func main() {
 		opt.Syncthing, opt.Folders = st, folders
 	}
 
-	// The first library that is a Syncthing folder holds the shared
-	// .movienight directory: invites and artwork travel through it.
-	var shared string
-	for _, l := range cfg.Libraries {
-		if f, ok := syncthing.FolderFor(folders, l.Path); ok {
-			shared = filepath.Join(l.Path, ".movienight")
-			opt.Role = server.Host
-			if f.Type == "receiveonly" {
-				opt.Role = server.Guest
-			}
-			break
-		}
-	}
+	// Invites and artwork travel through a .movienight folder inside the
+	// first library that Syncthing shares.
+	shared, role := server.DetectShare(cfg.Libraries, folders)
+	opt.Role = role
 	if cfg.SharedDir != "" {
 		shared = cfg.SharedDir
 		if opt.Role == server.Solo {
