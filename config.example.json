@@ -1,0 +1,9 @@
+{
+  "addr": "127.0.0.1:8737",
+  "libraries": [
+    { "name": "TV", "path": "D:\\TV", "kind": "tv" },
+    { "name": "Movies", "path": "D:\\Movies", "kind": "movies" }
+  ],
+  "exclude": [],
+  "syncplay": ""
+}

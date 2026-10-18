@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Movie Night</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Movie Night</h1>
+    <nav>
+      <button data-tab="shows" class="active">TV</button>
+      <button data-tab="movies">Movies</button>
+    </nav>
+    <input id="search" type="search" placeholder="Search" aria-label="Search the library">
+    <button id="rescan" title="Look for new files">Refresh</button>
+  </header>
+
+  <main>
+    <section id="grid" class="grid" aria-live="polite"></section>
+    <section id="show" hidden>
+      <button id="back">← All shows</button>
+      <h2 id="show-title"></h2>
+      <div id="seasons"></div>
+    </section>
+  </main>
+
+  <div id="toast" role="status" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

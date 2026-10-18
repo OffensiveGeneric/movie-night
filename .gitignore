@@ -1,0 +1,9 @@
+# Build output
+/bin/
+*.exe
+
+# Local settings and private notes (device IDs, room names, paths)
+config.json
+/notes/
+dad-*.md
+movie-night-protocol.md
