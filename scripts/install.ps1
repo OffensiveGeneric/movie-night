@@ -24,8 +24,11 @@ $installed = Join-Path $env:LOCALAPPDATA 'MovieNight\movienight.exe'
 $headers = @{ 'User-Agent' = 'movienight-installer' }
 
 Write-Host 'Looking for the newest Movie Night...'
-$release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases?per_page=10" -Headers $headers |
-    Where-Object { -not $_.draft } | Select-Object -First 1
+# Assign first: Windows PowerShell 5.1 passes a JSON array down the pipeline
+# as one object, so piping Invoke-RestMethod straight into Where-Object
+# would filter the whole list at once.
+$releases = Invoke-RestMethod "https://api.github.com/repos/$repo/releases?per_page=10" -Headers $headers
+$release = $releases | Where-Object { -not $_.draft } | Select-Object -First 1
 if (-not $release) { throw "No releases found for $repo." }
 $exeAsset = $release.assets | Where-Object { $_.name -eq 'movienight.exe' }
 $sumAsset = $release.assets | Where-Object { $_.name -eq 'SHA256SUMS' }
