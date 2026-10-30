@@ -10,6 +10,12 @@ shortcut, then:
   - otherwise updates Syncthing, Syncplay and VLC (skipped while you're
     watching) and restarts Movie Night if it was running.
 
+To join someone without being asked anything, set their code (and your
+name) first:
+
+    $env:MOVIENIGHT_JOIN = 'MN1-...'; $env:MOVIENIGHT_NAME = 'Dad'
+    irm https://raw.githubusercontent.com/OffensiveGeneric/movie-night/main/scripts/install.ps1 | iex
+
 Run it again any time to update. Works in Windows PowerShell 5.1 and 7.
 #>
 param(
@@ -68,7 +74,16 @@ finally {
 }
 
 $config = Join-Path $env:APPDATA 'movienight\config.json'
-if (-not (Test-Path $config)) {
+if ($env:MOVIENIGHT_JOIN) {
+    # Pairing code given up front: join without any questions.
+    $joinArgs = @('setup', 'join', $env:MOVIENIGHT_JOIN)
+    if ($env:MOVIENIGHT_NAME) { $joinArgs += @('-name', $env:MOVIENIGHT_NAME) }
+    Write-Host ''
+    Write-Host 'Pairing with the code you were sent...'
+    '' | & $installed @joinArgs
+    if ($LASTEXITCODE -ne 0) { throw 'Setup did not finish; see the messages above.' }
+}
+elseif (-not (Test-Path $config)) {
     Write-Host ''
     Write-Host "This computer isn't set up yet. Starting setup..."
     & $installed setup
