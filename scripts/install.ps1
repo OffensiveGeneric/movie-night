@@ -81,21 +81,24 @@ if ($env:MOVIENIGHT_JOIN) {
     Write-Host ''
     Write-Host 'Pairing with the code you were sent...'
     '' | & $installed @joinArgs
-    if ($LASTEXITCODE -ne 0) { throw 'Setup did not finish; see the messages above.' }
+    $setupFailed = $LASTEXITCODE -ne 0
 }
 elseif (-not (Test-Path $config)) {
     Write-Host ''
     Write-Host "This computer isn't set up yet. Starting setup..."
     & $installed setup
+    $setupFailed = $LASTEXITCODE -ne 0
 }
-else {
-    if (-not $SkipDeps) {
-        & $installed update
-    }
-    if ($wasRunning) {
-        Start-Process $installed
-    }
+elseif (-not $SkipDeps) {
+    & $installed update
 }
 
+if ($wasRunning) {
+    Start-Process $installed
+}
 Write-Host ''
+if ($setupFailed) {
+    Write-Warning 'Movie Night is installed, but setup did not finish; see the messages above.'
+    exit 1
+}
 Write-Host 'Done. Start Movie Night from the "Movie Night" shortcut on your desktop.'
