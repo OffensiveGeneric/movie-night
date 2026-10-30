@@ -10,7 +10,7 @@ My dad and I used Plex's Watch Together. It buffered, sometimes wouldn't resume 
 - **Watch together.** The host clicks Play; a few seconds later the guest's Movie Night shows *"Tyler is starting Star Trek DS9 S01E12 · Battle Lines [Join]"*. One click and both players open the same episode in sync.
 - **Download status.** On the receiving side every episode shows *ready*, *downloading* or *queued*, straight from Syncthing, plus how much is left.
 - **Continue watching.** "Next: S01E13" for every show you're partway through.
-- **Fixes the known Syncplay traps.** Spots the settings that make playback jump back to 00:00 or stall on "not ready", and fixes them in one click. A **Restart player** button rejoins the room if anything gets stuck.
+- **Fixes the known Syncplay traps.** Spots the settings that make playback jump back to 00:00 or stall on "not ready", and fixes them in one click. VLC is started without its "update available" dialog, because accepting it closes the player mid-episode. `movienight update` updates everything between episodes instead. A **Restart player** button rejoins the room if anything gets stuck.
 - **One-command setup, apt-style.** `movienight setup host` installs Syncthing, Syncplay and VLC if they're missing (from their official winget packages), shares the library, configures Syncplay, and prints a pairing code. `movienight setup join <code>` does the rest on the other computer, and the host clicks **Accept**. It's safe to re-run and has a `-dry-run`.
 
 ## How it works
@@ -36,7 +36,15 @@ My dad and I used Plex's Watch Together. It buffered, sometimes wouldn't resume 
 
 ## Setup
 
-On the computer with the library:
+**Install or update** (Windows), in PowerShell:
+
+```
+irm https://raw.githubusercontent.com/OffensiveGeneric/movie-night/main/scripts/install.ps1 | iex
+```
+
+It downloads the newest release, checks its SHA-256 against the release's `SHA256SUMS`, installs Movie Night with a desktop shortcut, and starts setup if the computer isn't set up yet. Run it again later to update Movie Night, Syncthing, Syncplay and VLC. It won't touch the players while you're watching.
+
+Setup by hand, on the computer with the library:
 
 ```
 movienight setup host

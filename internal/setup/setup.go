@@ -182,7 +182,11 @@ func (e *Env) configure(name, server, room string, dirs []string) error {
 	}
 	client = append(client, syncplay.Recommended...)
 	if err := e.step(fmt.Sprintf("set Syncplay's room, folders and player (room %s)", room), func() error {
-		return syncplay.Set(e.SyncplayIni, "client_settings", client)
+		if err := syncplay.Set(e.SyncplayIni, "client_settings", client); err != nil {
+			return err
+		}
+		// Also starts VLC without its update/privacy dialogs.
+		return syncplay.Fix(e.SyncplayIni)
 	}); err != nil {
 		return err
 	}

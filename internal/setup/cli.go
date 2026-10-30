@@ -24,7 +24,11 @@ const usage = `Usage:
   movienight setup join [CODE] [-name N] [-dir DIR] [-dry-run]
       On the other computer, with the host's code.
   movienight setup
-      Asks which of the two you are.`
+      Asks which of the two you are.
+  movienight install
+      Copies Movie Night to %LOCALAPPDATA%\MovieNight and adds a desktop shortcut.
+  movienight update [-force]
+      Updates Syncthing, Syncplay and VLC (refuses while you're watching).`
 
 type multi []string
 
@@ -61,6 +65,39 @@ func Main(args []string, in io.Reader, out io.Writer) int {
 		return 1
 	}
 	p.pause()
+	return 0
+}
+
+// Install runs "movienight install": the app copies itself into place and
+// adds a desktop shortcut. The install script calls this after downloading.
+func Install(args []string, out io.Writer) int {
+	dest, err := (&Env{Out: out}).InstallSelf()
+	if err != nil {
+		fmt.Fprintf(out, "Install failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(out, "Movie Night is installed at %s\n", dest)
+	return 0
+}
+
+// Update runs "movienight update": dependency upgrades, between episodes.
+func Update(args []string, out io.Writer) int {
+	fs := flag.NewFlagSet("update", flag.ContinueOnError)
+	fs.SetOutput(out)
+	force := fs.Bool("force", false, "update even if Syncplay or VLC is open (closes them)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	fmt.Fprintln(out, "Updating programs:")
+	if err := UpdateDeps(context.Background(), out, *force); err != nil {
+		fmt.Fprintf(out, "Update stopped: %v\n", err)
+		return 1
+	}
+	// A new VLC can land at a new path; make sure Syncplay still starts it
+	// without the update dialog.
+	if err := syncplay.Fix(syncplay.ConfigPath()); err != nil {
+		fmt.Fprintf(out, "  ! couldn't refresh Syncplay's settings: %v\n", err)
+	}
 	return 0
 }
 

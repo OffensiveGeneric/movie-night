@@ -4,9 +4,15 @@ One person is the **host**: the library lives on their computer. The other is th
 
 ## Quick setup (Windows)
 
-Download `movienight.exe` from the [releases page](https://github.com/OffensiveGeneric/movie-night/releases) on both computers.
+On both computers, open PowerShell and run:
 
-**Host**, in a terminal next to the file:
+```
+irm https://raw.githubusercontent.com/OffensiveGeneric/movie-night/main/scripts/install.ps1 | iex
+```
+
+That installs Movie Night (checking its SHA-256) with a desktop shortcut and starts the setup below. Run the same line later to update everything. You can also download `movienight.exe` from the [releases page](https://github.com/OffensiveGeneric/movie-night/releases) and run the commands yourself.
+
+**Host:**
 
 ```
 movienight setup host

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -104,20 +105,113 @@ func (s *Settings) Problems() []Setting {
 			out = append(out, r)
 		}
 	}
+	if player := s.values["playerpath"]; isVLC(player) {
+		have := parsePlayerArgs(s.values["perplayerarguments"])[player]
+		for _, want := range VLCArgs {
+			if !contains(have, want) {
+				out = append(out, Setting{"perplayerarguments", strings.Join(VLCArgs, " ")})
+				break
+			}
+		}
+	}
 	return out
+}
+
+// VLCArgs are passed to VLC whenever Syncplay starts it. VLC otherwise asks
+// about updates (and, the first time, about privacy) in a dialog on start;
+// saying yes to an update closes VLC mid-episode. Updating happens through
+// "movienight update" between episodes instead.
+var VLCArgs = []string{"--no-qt-updates-notif", "--no-qt-privacy-ask"}
+
+func isVLC(player string) bool {
+	return strings.Contains(strings.ToLower(filepath.Base(player)), "vlc")
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 // Fix rewrites the settings file with the recommended values, leaving every
 // other line alone. Syncplay needs restarting to pick them up.
-func Fix(path string) error { return Set(path, "client_settings", Recommended) }
+func Fix(path string) error {
+	if err := Set(path, "client_settings", Recommended); err != nil {
+		return err
+	}
+	return applyVLCArgs(path)
+}
+
+// applyVLCArgs adds VLCArgs for the configured player if it's VLC, keeping
+// whatever arguments are set for it and for other players.
+func applyVLCArgs(path string) error {
+	s, err := Read(path)
+	if err != nil {
+		return err
+	}
+	player := s.values["playerpath"]
+	if !isVLC(player) {
+		return nil
+	}
+	args := parsePlayerArgs(s.values["perplayerarguments"])
+	for _, a := range VLCArgs {
+		if !contains(args[player], a) {
+			args[player] = append(args[player], a)
+		}
+	}
+	return Set(path, "client_settings", []Setting{{"perplayerarguments", formatPlayerArgs(args)}})
+}
+
+// perplayerarguments is a Python dict literal keyed by the player's exact
+// path: {'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe': ['--a', '--b']}
+var (
+	playerEntry = regexp.MustCompile(`'((?:[^'\\]|\\.)*)'\s*:\s*\[([^\]]*)\]`)
+)
+
+func unescape(s string) string { return strings.NewReplacer(`\\`, `\`, `\'`, `'`).Replace(s) }
+
+func escape(s string) string {
+	return "'" + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), "'", `\'`) + "'"
+}
+
+func parsePlayerArgs(raw string) map[string][]string {
+	out := map[string][]string{}
+	for _, m := range playerEntry.FindAllStringSubmatch(raw, -1) {
+		var args []string
+		for _, a := range listItem.FindAllStringSubmatch(m[2], -1) {
+			args = append(args, unescape(a[1]))
+		}
+		out[unescape(m[1])] = args
+	}
+	return out
+}
+
+func formatPlayerArgs(args map[string][]string) string {
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var entries []string
+	for _, k := range keys {
+		quoted := make([]string, len(args[k]))
+		for i, a := range args[k] {
+			quoted[i] = escape(a)
+		}
+		entries = append(entries, escape(k)+": ["+strings.Join(quoted, ", ")+"]")
+	}
+	return "{" + strings.Join(entries, ", ") + "}"
+}
 
 // FormatList writes paths the way Syncplay stores mediasearchdirectories: a
 // Python list literal with backslashes escaped.
 func FormatList(paths []string) string {
 	quoted := make([]string, len(paths))
 	for i, p := range paths {
-		p = strings.ReplaceAll(p, `\`, `\\`)
-		quoted[i] = "'" + strings.ReplaceAll(p, "'", `\'`) + "'"
+		quoted[i] = escape(p)
 	}
 	return "[" + strings.Join(quoted, ", ") + "]"
 }
