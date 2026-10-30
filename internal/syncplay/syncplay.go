@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -40,9 +41,13 @@ type Setting struct{ Key, Value string }
 type Settings struct {
 	Name      string
 	Room      string
+	Server    string // host:port, or "" if unset
 	MediaDirs []string
 	values    map[string]string // client_settings, lower-cased keys
 }
+
+// bom is the UTF-8 byte order mark some editors put at the start of the file.
+const bom = string(rune(0xFEFF))
 
 var listItem = regexp.MustCompile(`'((?:[^'\\]|\\.)*)'`)
 
@@ -56,21 +61,35 @@ func Read(path string) (*Settings, error) {
 		return nil, err
 	}
 	s := &Settings{values: map[string]string{}}
+	server := map[string]string{}
 	section := ""
-	for _, line := range strings.Split(strings.TrimPrefix(string(b), "\ufeff"), "\n") {
+	for _, line := range strings.Split(strings.TrimPrefix(string(b), bom), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			section = strings.ToLower(line[1 : len(line)-1])
 			continue
 		}
 		key, value, ok := strings.Cut(line, "=")
-		if !ok || section != "client_settings" {
+		if !ok {
 			continue
 		}
-		s.values[strings.ToLower(strings.TrimSpace(key))] = strings.TrimSpace(value)
+		key, value = strings.ToLower(strings.TrimSpace(key)), strings.TrimSpace(value)
+		switch section {
+		case "client_settings":
+			s.values[key] = value
+		case "server_data":
+			server[key] = value
+		}
 	}
 	s.Name = s.values["name"]
 	s.Room = s.values["room"]
+	// Syncplay stores either host = "example.org:8999" or host and port apart.
+	if h := server["host"]; h != "" && h != "None" {
+		s.Server = h
+		if p := server["port"]; p != "" && !strings.Contains(h, ":") {
+			s.Server = h + ":" + p
+		}
+	}
 	// mediasearchdirectories is a Python list literal: ['C:\\TV', 'D:\\Movies']
 	for _, m := range listItem.FindAllStringSubmatch(s.values["mediasearchdirectories"], -1) {
 		s.MediaDirs = append(s.MediaDirs, strings.ReplaceAll(m[1], `\\`, `\`))
@@ -86,38 +105,155 @@ func (s *Settings) Problems() []Setting {
 			out = append(out, r)
 		}
 	}
+	if player := s.values["playerpath"]; isVLC(player) {
+		have := parsePlayerArgs(s.values["perplayerarguments"])[player]
+		for _, want := range VLCArgs {
+			if !contains(have, want) {
+				out = append(out, Setting{"perplayerarguments", strings.Join(VLCArgs, " ")})
+				break
+			}
+		}
+	}
 	return out
+}
+
+// VLCArgs are passed to VLC whenever Syncplay starts it. VLC otherwise asks
+// about updates (and, the first time, about privacy) in a dialog on start;
+// saying yes to an update closes VLC mid-episode. Updating happens through
+// "movienight update" between episodes instead.
+var VLCArgs = []string{"--no-qt-updates-notif", "--no-qt-privacy-ask"}
+
+func isVLC(player string) bool {
+	return strings.Contains(strings.ToLower(filepath.Base(player)), "vlc")
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 // Fix rewrites the settings file with the recommended values, leaving every
 // other line alone. Syncplay needs restarting to pick them up.
 func Fix(path string) error {
-	b, err := os.ReadFile(path)
+	if err := Set(path, "client_settings", Recommended); err != nil {
+		return err
+	}
+	return applyVLCArgs(path)
+}
+
+// applyVLCArgs adds VLCArgs for the configured player if it's VLC, keeping
+// whatever arguments are set for it and for other players.
+func applyVLCArgs(path string) error {
+	s, err := Read(path)
 	if err != nil {
 		return err
 	}
-	text := strings.TrimPrefix(string(b), "\ufeff")
+	player := s.values["playerpath"]
+	if !isVLC(player) {
+		return nil
+	}
+	args := parsePlayerArgs(s.values["perplayerarguments"])
+	for _, a := range VLCArgs {
+		if !contains(args[player], a) {
+			args[player] = append(args[player], a)
+		}
+	}
+	return Set(path, "client_settings", []Setting{{"perplayerarguments", formatPlayerArgs(args)}})
+}
+
+// perplayerarguments is a Python dict literal keyed by the player's exact
+// path: {'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe': ['--a', '--b']}
+var (
+	playerEntry = regexp.MustCompile(`'((?:[^'\\]|\\.)*)'\s*:\s*\[([^\]]*)\]`)
+)
+
+func unescape(s string) string { return strings.NewReplacer(`\\`, `\`, `\'`, `'`).Replace(s) }
+
+func escape(s string) string {
+	return "'" + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), "'", `\'`) + "'"
+}
+
+func parsePlayerArgs(raw string) map[string][]string {
+	out := map[string][]string{}
+	for _, m := range playerEntry.FindAllStringSubmatch(raw, -1) {
+		var args []string
+		for _, a := range listItem.FindAllStringSubmatch(m[2], -1) {
+			args = append(args, unescape(a[1]))
+		}
+		out[unescape(m[1])] = args
+	}
+	return out
+}
+
+func formatPlayerArgs(args map[string][]string) string {
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var entries []string
+	for _, k := range keys {
+		quoted := make([]string, len(args[k]))
+		for i, a := range args[k] {
+			quoted[i] = escape(a)
+		}
+		entries = append(entries, escape(k)+": ["+strings.Join(quoted, ", ")+"]")
+	}
+	return "{" + strings.Join(entries, ", ") + "}"
+}
+
+// FormatList writes paths the way Syncplay stores mediasearchdirectories: a
+// Python list literal with backslashes escaped.
+func FormatList(paths []string) string {
+	quoted := make([]string, len(paths))
+	for i, p := range paths {
+		quoted[i] = escape(p)
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+// Set writes key = value pairs into one section of the settings file,
+// replacing existing keys and adding missing ones (and the section, and the
+// file) as needed. Every other line is left as it was.
+func Set(path, section string, values []Setting) error {
+	b, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	text := strings.TrimPrefix(string(b), bom)
 	newline := "\n"
-	if strings.Contains(text, "\r\n") {
+	if strings.Contains(text, "\r\n") || (text == "" && runtime.GOOS == "windows") {
 		newline = "\r\n"
 	}
-	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	var lines []string
+	if text != "" {
+		lines = strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	}
 
 	pending := map[string]string{}
-	for _, r := range Recommended {
-		pending[r.Key] = r.Value
+	for _, v := range values {
+		pending[strings.ToLower(v.Key)] = v.Value
 	}
-	section, sectionEnd := "", -1
+	current, sectionEnd := "", -1
 	for i, line := range lines {
 		t := strings.TrimSpace(line)
 		if strings.HasPrefix(t, "[") && strings.HasSuffix(t, "]") {
-			section = strings.ToLower(t[1 : len(t)-1])
+			current = strings.ToLower(t[1 : len(t)-1])
+			if current == section {
+				sectionEnd = i
+			}
 			continue
 		}
-		if section != "client_settings" {
+		if current != section {
 			continue
 		}
-		sectionEnd = i
+		if t != "" {
+			sectionEnd = i
+		}
 		key, _, ok := strings.Cut(t, "=")
 		key = strings.ToLower(strings.TrimSpace(key))
 		if v, want := pending[key]; ok && want {
@@ -127,17 +263,23 @@ func Fix(path string) error {
 	}
 
 	var extra []string
-	for _, r := range Recommended {
-		if v, ok := pending[r.Key]; ok {
-			extra = append(extra, r.Key+" = "+v)
+	for _, v := range values {
+		if val, ok := pending[strings.ToLower(v.Key)]; ok {
+			extra = append(extra, strings.ToLower(v.Key)+" = "+val)
 		}
 	}
 	if len(extra) > 0 {
 		if sectionEnd < 0 {
-			lines = append(lines, "[client_settings]")
+			if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) != "" {
+				lines = append(lines, "")
+			}
+			lines = append(lines, "["+section+"]")
 			sectionEnd = len(lines) - 1
 		}
 		lines = append(lines[:sectionEnd+1], append(extra, lines[sectionEnd+1:]...)...)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
 	}
 	return os.WriteFile(path, []byte(strings.Join(lines, newline)), 0o644)
 }

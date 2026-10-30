@@ -11,6 +11,67 @@ const sample = "[server_data]\r\nhost = syncplay.pl\r\n\r\n[client_settings]\r\n
 	"mediasearchdirectories = ['C:\\\\Users\\\\Dad\\\\Videos\\\\Movie Night', 'D:\\\\Movies']\r\n" +
 	"sharedplaylistenabled = True\r\nreadyatstart = True\r\n\r\n[gui]\r\nshowosd = True\r\n"
 
+func TestSetCreatesAndRoundTrips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "syncplay.ini")
+	dirs := []string{`C:\Users\Dad\Videos\Movie Night`, `D:\Dad's Movies`}
+	if err := Set(path, "server_data", []Setting{{"host", "syncplay.pl"}, {"port", "8997"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Set(path, "client_settings", []Setting{{"name", "Dad"}, {"mediasearchdirectories", FormatList(dirs)}}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Name != "Dad" || len(s.MediaDirs) != 2 || s.MediaDirs[0] != dirs[0] {
+		t.Errorf("round trip: name %q dirs %q", s.Name, s.MediaDirs)
+	}
+	// Setting again replaces rather than duplicates.
+	Set(path, "client_settings", []Setting{{"name", "Pops"}})
+	b, _ := os.ReadFile(path)
+	if strings.Count(string(b), "name =") != 1 || !strings.Contains(string(b), "name = Pops") {
+		t.Errorf("name not replaced in place:\n%s", b)
+	}
+}
+
+func TestFixAddsVLCArgsAndKeepsOthers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syncplay.ini")
+	vlc := `C:\Program Files\VideoLAN\VLC\vlc.exe`
+	ini := "[client_settings]\r\nplayerpath = " + vlc + "\r\n" +
+		`perplayerarguments = {'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe': ['--fullscreen'], 'C:\\mpv\\mpv.exe': ['--fs']}` + "\r\n"
+	os.WriteFile(path, []byte(ini), 0o644)
+
+	s, _ := Read(path)
+	found := false
+	for _, p := range s.Problems() {
+		found = found || p.Key == "perplayerarguments"
+	}
+	if !found {
+		t.Fatalf("missing VLC args not reported: %v", s.Problems())
+	}
+	if err := Fix(path); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = Read(path)
+	if p := s.Problems(); len(p) != 0 {
+		t.Errorf("still problems after Fix: %v", p)
+	}
+	args := parsePlayerArgs(s.values["perplayerarguments"])
+	if got := args[vlc]; len(got) != 3 || got[0] != "--fullscreen" {
+		t.Errorf("VLC args = %q, want --fullscreen kept plus %q", got, VLCArgs)
+	}
+	if got := args[`C:\mpv\mpv.exe`]; len(got) != 1 || got[0] != "--fs" {
+		t.Errorf("mpv args lost: %q", got)
+	}
+	// Fixing again doesn't duplicate.
+	Fix(path)
+	s, _ = Read(path)
+	if got := parsePlayerArgs(s.values["perplayerarguments"])[vlc]; len(got) != 3 {
+		t.Errorf("second Fix duplicated args: %q", got)
+	}
+}
+
 func TestReadAndFix(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "syncplay.ini")
 	os.WriteFile(path, []byte(sample), 0o644)

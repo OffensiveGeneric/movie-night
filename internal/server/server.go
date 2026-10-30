@@ -154,7 +154,84 @@ func (s *Server) Handler() http.Handler {
 	post("/api/restart", s.handleRestart)
 	post("/api/invite/dismiss", s.handleDismiss)
 	post("/api/syncplay/fix", s.handleFixSyncplay)
+	mux.HandleFunc("GET /api/pairing", s.handlePairing)
+	post("/api/pairing/accept", s.handleAccept)
 	return mux
+}
+
+// handlePairing lists computers that asked Syncthing to connect (after
+// running "movienight setup join") and haven't been accepted yet.
+func (s *Server) handlePairing(w http.ResponseWriter, r *http.Request) {
+	if s.opt.Role != Host || s.opt.Syncthing == nil {
+		writeJSON(w, map[string]any{"pending": []any{}})
+		return
+	}
+	pending, err := s.opt.Syncthing.PendingDevices(r.Context())
+	if err != nil {
+		writeJSON(w, map[string]any{"pending": []any{}})
+		return
+	}
+	writeJSON(w, map[string]any{"pending": pending})
+}
+
+// handleAccept adds a waiting computer and shares every library folder with
+// it, so its copy starts filling.
+func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
+	if s.opt.Role != Host || s.opt.Syncthing == nil {
+		http.Error(w, "only the host accepts computers", http.StatusForbidden)
+		return
+	}
+	var req struct {
+		ID, Name string
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	// Only accept a device that actually asked; never an arbitrary ID.
+	pending, err := s.opt.Syncthing.PendingDevices(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	known := false
+	for _, p := range pending {
+		if p.ID == req.ID {
+			known, req.Name = true, firstNonEmpty(req.Name, p.Name)
+		}
+	}
+	if !known {
+		http.Error(w, "that computer isn't waiting to connect", http.StatusNotFound)
+		return
+	}
+	st := s.opt.Syncthing
+	if err := st.AddDevice(r.Context(), req.ID, req.Name); err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	shared := map[string]bool{}
+	for _, l := range s.opt.Config.Libraries {
+		m, ok := syncthing.Locate(s.opt.Folders, l.Path)
+		if !ok || shared[m.Folder.ID] {
+			continue
+		}
+		if err := st.ShareFolder(r.Context(), m.Folder.ID, req.ID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		shared[m.Folder.ID] = true
+	}
+	log.Printf("accepted %s and shared %d folder(s)", req.Name, len(shared))
+	writeJSON(w, map[string]any{"name": req.Name, "folders": len(shared)})
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // requireAppHeader rejects state-changing requests that don't carry a custom
